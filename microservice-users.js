@@ -112,7 +112,7 @@ function microserviceUsersPOST(jsonData, requestDetails, callback) {
     }
   }
   jsonData.login = jsonData.login.toLowerCase();
-  loginValidation(jsonData.login, function(err) {
+  loginValidation(jsonData.login, requestDetails, function(err) {
     if (err) {
       return callback(err);
     }
@@ -175,7 +175,7 @@ function microserviceUsersPUT(jsonData, requestDetails, callback) {
     }
   }
   if (loginChange !== false) {
-    loginValidation(loginChange, function(err) {
+    loginValidation(loginChange, requestDetails, function(err) {
       if (err) {
         return callback(err);
       }
@@ -277,7 +277,7 @@ function microserviceUsersSEARCH(jsonData, requestDetails, callback) {
 function generateHash(pass, callback) {
   let hash = {};
   hash.salt = crypto.randomBytes(128).toString('base64');
-  hash.iterations = 100000;
+  hash.iterations = 1000;
   hash.keylen = 512;
   hash.digest = 'sha512';
   crypto.pbkdf2(
@@ -299,7 +299,7 @@ function generateHash(pass, callback) {
 /**
  * Validate login.
  */
-function loginValidation(login, callback) {
+function loginValidation(login, requestDetails, callback) {
   if (login.length < process.env.LOGIN_MIN_LENGTH) {
     return callback(new Error('Minimum login length is ' + process.env.LOGIN_MIN_LENGTH));
   }

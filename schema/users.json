@@ -9,8 +9,7 @@
     },
     "password": {
       "type": "string",
-      "description": "Password.",
-      "required": true
+      "description": "Password."
     },
     "role": {
       "type": "string",

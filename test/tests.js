@@ -17,18 +17,21 @@ describe('USERS CRUD API',function(){
   }
   it('POST should return 200',function(done){
     client.post(userMember, function(err, handlerResponse){
-      RecordID = handlerResponse.id;
+      RecordID = handlerResponse.login;
       RecordToken = handlerResponse.token;
-      console.log(handlerResponse);
       expect(err).to.equal(null);
       done();
     });
   });
-
+  it('GET should return 200 and login',function(done){
+    client.get(RecordID, RecordToken, function(err, handlerResponse){
+      expect(err).to.equal(null);
+      done();
+    });
+  });
   it('SEARCH should return 200',function(done){
     client.search({ "login": userMember.login }, function(err, handlerResponse){
       expect(err).to.equal(null);
-      console.log(handlerResponse);
       expect(handlerResponse).to.not.equal(null);
       done();
     });
@@ -37,7 +40,9 @@ describe('USERS CRUD API',function(){
   it('PUT login should return 200',function(done){
     client.put(RecordID, RecordToken, {login: 'user2'}, function(err, handlerResponse){
       expect(err).to.equal(null);
-      console.log(handlerResponse);
+      if(!err){
+        RecordID = 'user2';
+      }
       done();
     });
   });
@@ -46,14 +51,12 @@ describe('USERS CRUD API',function(){
     client.get(RecordID, RecordToken, function(err, handlerResponse){
       expect(err).to.equal(null);
       expect(handlerResponse.login).to.equal('user2');
-      console.log(handlerResponse);
       done();
     });
   });
 
   it('PUT password should return 200',function(done){
     client.put(RecordID, RecordToken, {password: 'user2'}, function(err, handlerResponse){
-      console.log(handlerResponse);
       expect(err).to.equal(null);
       done();
     });
