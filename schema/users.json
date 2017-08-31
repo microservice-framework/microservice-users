@@ -1,0 +1,25 @@
+{
+  "id": "/Auth",
+  "type": "object",
+  "properties": {
+    "login": {
+      "type": "string",
+      "description": "Login name.",
+      "required": true
+    },
+    "password": {
+      "type": "string",
+      "description": "Password.",
+      "required": true
+    },
+    "role": {
+      "type": "string",
+      "enum": ["user", "admin"],
+      "description": "User role."
+    },
+    "suspended": {
+      "type": "boolean",
+      "description": "Is user suspended."
+    }
+  }
+}
