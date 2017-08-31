@@ -9,6 +9,8 @@ const Microservice = require(framework + '/microservice');
 const MicroserviceRouterRegister = require(framework + '/microservice-router-register').register;
 const debugF = require('debug');
 const crypto = require('crypto');
+const updateAcceptedCmds = [ '$inc', '$mul', '$set', '$unset', '$min', '$max',
+  '$currentDate', '$push', '$pull', '$pop', '$addToSet', '$pushAll', '$pullAll' ];
 
 var debug = {
   log: debugF('proxy:log'),
@@ -79,22 +81,22 @@ function microserviceUsersINIT(cluster, worker, address) {
  */
 function microserviceUsersGET(jsonData, requestDetails, callback) {
   requestDetails.url = requestDetails.url.toLowerCase();
+  if (process.env.PRIVATE_USERS) {
+    if (requestDetails.credentials) {
+      if (requestDetails.credentials.role != 'admin') {
+        if (requestDetails.credentials.username != requestDetails.url) {
+          return callback(new Error('Access violation. You have access only to your own user.'));
+        }
+      }
+    }
+  }
   mservice.get(jsonData, requestDetails, function(err, handlerResponse) {
     if (err) {
       return callback(err, handlerResponse);
     }
-
-    // Remove password from output.
-    delete handlerResponse.answer.hash;
-    if(requestDetails.auth_methods && requestDetails.auth_methods['search']) {
-      return callback(err, handlerResponse);
-    }
+    // Remove hash from output if access by credentials.
     if (requestDetails.credentials) {
-      if (requestDetails.credentials.username) {
-        if (requestDetails.credentials.username != handlerResponse.answer.login) {
-          return callback(new Error('Access violation.'));
-        }
-      }
+      delete handlerResponse.answer.hash;
     }
     return callback(err, handlerResponse);
   });
@@ -104,62 +106,154 @@ function microserviceUsersGET(jsonData, requestDetails, callback) {
  * POST handler.
  */
 function microserviceUsersPOST(jsonData, requestDetails, callback) {
-  jsonData.login = jsonData.login.toLowerCase();
-  var searchUser = {
-    login: jsonData.login
+  if (requestDetails.credentials) {
+    if (requestDetails.credentials.role != 'admin') {
+      return callback(new Error('Access violation. You have no right to create new user.'));
+    }
   }
-  mservice.search(searchToken, requestDetails, function(err, handlerResponse) {
-    if (handlerResponse.code != 404) {
-      return callback(new Error('Login already taken violation.'));
+  jsonData.login = jsonData.login.toLowerCase();
+  loginValidation(jsonData.login, function(err) {
+    if (err) {
+      return callback(err);
     }
 
     // Replace password with hash.
-    generateHash(jsonData.password,function(err, hash){
-      if(err) {
+    generateHash(jsonData.password,function(err, hash) {
+      if (err) {
         return callback(err);
       }
       jsonData.hash = hash;
       delete jsonData.password;
-      mservice.post(jsonData, requestDetails, callback);
+      mservice.post(jsonData, requestDetails, function(err, handlerResponse) {
+        // Remove hash from output if access by credentials.
+        if (requestDetails.credentials) {
+          delete handlerResponse.answer.hash;
+        }
+        callback(err, handlerResponse);
+      });
     });
-  });
+  })
 }
 
 /**
  * Wrapper for PUT.
  */
 function microserviceUsersPUT(jsonData, requestDetails, callback) {
-  // TODO use user for diferentiate CRUDS.
   requestDetails.url = requestDetails.url.toLowerCase();
   if (requestDetails.credentials) {
-      if (requestDetails.credentials.username) {
-        if (requestDetails.credentials.username != requestDetails.url) {
-          if(requestDetails.auth_methods && !requestDetails.auth_methods['search']) {
-            return callback(new Error('Access violation.'));
-          }
+    if (requestDetails.credentials.role != 'admin') {
+      if (requestDetails.credentials.username != requestDetails.url) {
+        return callback(new Error('Access violation. You have access only to your own user.'));
+      }
+    }
+  }
+  if (jsonData.hash) {
+    return callback(new Error('Access violation. You have no right to replace hash field.'));
+  }
+  for (var cmd in jsonData) {
+    if (updateAcceptedCmds.indexOf(cmd) > -1) {
+      for (var key in jsonData[cmd]) {
+        if (key == 'hash') {
+          return callback(new Error('Access violation. You have no right to replace hash field.'));
         }
       }
     }
-  // TODO: Replace password with hash here.
-  if(jsonData.password) {
-    generateHash(jsonData.password, function(err, hash){
-      if(err) {
+  }
+  let loginChange = false;
+  if (jsonData.login) {
+    jsonData.login = jsonData.login.toLowerCase();
+    loginChange = jsonData.login;
+  }
+  for (var cmd in jsonData) {
+    if (updateAcceptedCmds.indexOf(cmd) > -1) {
+      for (var key in jsonData[cmd]) {
+        if (key == 'login') {
+          jsonData[cmd]['login'] = jsonData[cmd]['login'].toLowerCase();
+          loginChange = jsonData[cmd]['login'];
+        }
+      }
+    }
+  }
+  if (loginChange !== false) {
+    loginValidation(loginChange, function(err) {
+      if (err) {
         return callback(err);
       }
-      jsonData.hash = hash;
-      delete jsonData.password;
-      mservice.put(jsonData, requestDetails, callback);
+      updateRecord(jsonData, requestDetails, callback);
     });
     return;
   }
-  mservice.put(jsonData, requestDetails, callback);
+  updateRecord(jsonData, requestDetails, callback);
+}
+
+/**
+ * Helper function to save record.
+ */
+function updateRecord(jsonData, requestDetails, callback) {
+  // Replace password with hash here.
+  let newPassword = false;
+  if (jsonData.password) {
+    newPassword = jsonData.password;
+    delete jsonData.password;
+  }
+  let isSet = false;
+  for (var cmd in jsonData) {
+    if (updateAcceptedCmds.indexOf(cmd) > -1) {
+      for (var key in jsonData[cmd]) {
+        if (key == 'password') {
+          newPassword = jsonData[cmd]['password'];
+          delete jsonData[cmd]['password'];
+          isSet = true;
+        }
+      }
+    }
+  }
+  if (newPassword !== false) {
+    generateHash(newPassword, function(err, hash) {
+      if (err) {
+        return callback(err);
+      }
+      if (isSet) {
+        if (jsonData['$set']) {
+          jsonData['$set']['hash'] = hash;
+        } else {
+          jsonData['$set'] = {
+            hash: hash
+          }
+        }
+      } else {
+        jsonData.hash = hash;
+      }
+      mservice.put(jsonData, requestDetails, function(err, handlerResponse) {
+        // Remove hash from output if access by credentials.
+        if (requestDetails.credentials) {
+          delete handlerResponse.answer.hash;
+        }
+        callback(err, handlerResponse);
+      });
+    });
+    return;
+  }
+  mservice.put(jsonData, requestDetails, function(err, handlerResponse) {
+    // Remove hash from output if access by credentials.
+    if (requestDetails.credentials) {
+      delete handlerResponse.answer.hash;
+    }
+    callback(err, handlerResponse);
+  });
 }
 
 /**
  * Wrapper for Search.
  */
 function microserviceUsersSEARCH(jsonData, requestDetails, callback) {
-
+  if (process.env.PRIVATE_USERS) {
+    if (requestDetails.credentials) {
+      if (requestDetails.credentials.role != 'admin') {
+        return callback(new Error('Access violation.'));
+      }
+    }
+  }
   mservice.search(jsonData, requestDetails, function(err, handlerResponse) {
     if (err) {
       return callback(err, handlerResponse);
@@ -167,9 +261,11 @@ function microserviceUsersSEARCH(jsonData, requestDetails, callback) {
     if (handlerResponse.code == 404) {
       return callback(err, handlerResponse);
     }
-    for(var user of handlerResponse.answer) {
-      // Remove password from output.
-      delete user.hash;
+    // Remove hash from output if access by credentials.
+    if (requestDetails.credentials) {
+      for (var user of handlerResponse.answer) {
+        delete user.hash;
+      }
     }
     return callback(null, handlerResponse);
   });
@@ -191,11 +287,32 @@ function generateHash(pass, callback) {
     hash.keylen,
     hash.digest,
     function(err, derivedKey) {
-      if(err) {
+      if (err) {
         return callback(err);
       }
       hash.hash = derivedKey.toString('hex');
       callback(err, hash);
     }
   );
+}
+
+/**
+ * Validate login.
+ */
+function loginValidation(login, callback) {
+  if (login.length < process.env.LOGIN_MIN_LENGTH) {
+    return callback(new Error('Minimum login length is ' + process.env.LOGIN_MIN_LENGTH));
+  }
+  if (login.length > process.env.LOGIN_MAX_LENGTH) {
+    return callback(new Error('Maximum login length is ' + process.env.LOGIN_MAX_LENGTH));
+  }
+  var searchUser = {
+    login: login
+  }
+  mservice.search(searchUser, requestDetails, function(err, handlerResponse) {
+    if (handlerResponse.code != 404) {
+      return callback(new Error('Login already taken.'));
+    }
+    return callback(null);
+  });
 }
