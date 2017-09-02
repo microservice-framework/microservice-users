@@ -13,8 +13,8 @@ const updateAcceptedCmds = [ '$inc', '$mul', '$set', '$unset', '$min', '$max',
   '$currentDate', '$push', '$pull', '$pop', '$addToSet', '$pushAll', '$pullAll' ];
 
 var debug = {
-  log: debugF('proxy:log'),
-  debug: debugF('proxy:debug')
+  log: debugF('users:log'),
+  debug: debugF('users:debug')
 };
 
 require('dotenv').config();
@@ -118,7 +118,7 @@ function microserviceUsersPOST(jsonData, requestDetails, callback) {
     }
 
     // Replace password with hash.
-    generateHash(jsonData.password,function(err, hash) {
+    generateHash(jsonData.password, function(err, hash) {
       if (err) {
         return callback(err);
       }
@@ -147,6 +147,13 @@ function microserviceUsersPUT(jsonData, requestDetails, callback) {
       }
     }
   }
+  if (jsonData.role) {
+    if (requestDetails.credentials) {
+      if (requestDetails.credentials.role != 'admin') {
+        return callback(new Error('Access violation. You have no right to change role.'));
+      }
+    }
+  }
   if (jsonData.hash) {
     return callback(new Error('Access violation. You have no right to replace hash field.'));
   }
@@ -155,6 +162,13 @@ function microserviceUsersPUT(jsonData, requestDetails, callback) {
       for (var key in jsonData[cmd]) {
         if (key == 'hash') {
           return callback(new Error('Access violation. You have no right to replace hash field.'));
+        }
+        if (key == 'role') {
+          if (requestDetails.credentials) {
+            if (requestDetails.credentials.role != 'admin') {
+              return callback(new Error('Access violation. You have no right to change role.'));
+            }
+          }
         }
       }
     }
